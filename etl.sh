@@ -10,6 +10,8 @@ TRANSFORMED="./Transformed/"
 RAW_CSV="./raw/raw_csv.csv"
 RAW_CSV_BCKUP="./raw/raw_csv.csv.bckup"
 TRANSFORMED_CSV="./Transformed/2023_year_finance.csv"
+GOLD="./Gold/"
+GOLD_CSV="./Gold/2023_year_finance.csv"
 LOG_FILE="./log_file.log"
 
 #######################################################################################################
@@ -66,8 +68,8 @@ fi;
 
 # Check if the 2023_year_finance.csv exists and not empty
 echo "$(date): Checking if the $TRANSFORMED_CSV already exist and not empty..." | tee -a "$LOG_FILE"
-if [[ -f "$TRANSFORMED_CSV" && -s "$TRANSFORMED_CSV" ]]; then
-    echo "$(date): The $TRANSFORMED_CSV already exist and not empty. Proceeding to the Load Phase" | tee -a "$LOG_FILE"
+if [[ -f "$TRANSFORMED_CSV" && -s "$TRANSFORMED_CSV" && "$TRANSFORMED_CSV" -nt "$RAW_CSV" ]]; then
+    echo "$(date): The $TRANSFORMED_CSV already exist, not empty and up to date. Proceeding to the Load Phase" | tee -a "$LOG_FILE"
 else
     echo "$(date): The file does not exist. Creating file..." | tee -a "$LOG_FILE"
     touch "$TRANSFORMED_CSV"
@@ -80,5 +82,32 @@ else
 fi;
 
 
+######################################################################################################
+                                        # LOAD
+######################################################################################################
+
+echo "$(date): The Load Phase started..." | tee -a "$LOG_FILE"
+
+# Check if the Gold Folder exists, if not, creates it
+echo "$(date): Checking if the Gold folder $GOLD exists..." | tee -a "$LOG_FILE"
+if [[ -d "$GOLD" ]]; then
+    echo "$(date): The Gold folder $GOLD exist." | tee -a "$LOG_FILE"
+else
+    echo "$(date): The Gold folder $GOLD doesn't exist. Creating folder..." | tee -a "$LOG_FILE"
+    mkdir -p "$GOLD"
+    echo "$(date): The Gold folder $GOLD created" | tee -a "$LOG_FILE"
+fi;
+
+# Check if the file 2023_year_finance.csv already exists in the Gold folder
+echo "$(date): Checking if the file 2023_year_finance.csv already exists in the Gold folder..." | tee -a "$LOG_FILE"
+if [[ -f "$GOLD_CSV" && -s "$GOLD_CSV" && "$GOLD_CSV" -nt "$TRANSFORMED_CSV" ]]; then
+    echo "$(date): The file 2023_year_finance.csv already exists in the Gold folder,not empty and up to date. Aborting Load...." | tee -a "$LOG_FILE"
+else
+    echo "$(date): The Gold folder is empty. Loading...." | tee -a "$LOG_FILE"
+    cp "$TRANSFORMED_CSV" "$GOLD_CSV"
+    echo "$(date): The file 2023_year_finance.csv successfully Loaded to the Gold $GOLD folder" | tee -a "$LOG_FILE"
+fi;
+
+echo "$(date): The ETL Process Successfully completed" | tee -a "$LOG_FILE"
 
 
