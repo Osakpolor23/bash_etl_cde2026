@@ -112,6 +112,6 @@ echo "$(date): The ETL Process Successfully completed" | tee -a "$LOG_FILE"
 
 # Automate the pipeline using cron scheduler
 # Run the command crontab -e to open the cron editor and edit
-# echo "0 0 * * * bash scripts.sh" -- Append this line
+# 0 0 * * * bash /path_to/etl.sh -- Append this line
 # crontab -l --use this to check the existing jobs on the crontab
 
