@@ -1,6 +1,15 @@
-# NZ Annual Enterprise Survey ETL Pipeline Using Bash Scripting
-This is a small but yet efficiently idempotent bash ETL pipeline that extracts NZ Stats' Annual
-Enterprise Survey data into a Raw folder, transforms it and outputs into a Transformed layer, and then loads it into a Gold layer. The aim is to clearly mirror a medallion architecture of moving data from a Raw layer, to Silver and then to Gold.
+# Bash Data Engineering Scripts: NZ Enterprise Survey ETL & File Migration Utility
+ 
+A small collection of bash scripts built to practice core data engineering
+concepts such as idempotent pipelines, file-state logic, and safe file handling
+using shell scripting. The repo currently contains two independent scripts:
+ 
+1. **`etl.sh`** — Extracts NZ Stats' Annual Enterprise Survey data, transforms
+   it, and loads it into a Gold layer, following a medallion architecture.
+
+2. **`migrate.sh`** — A standalone utility that scans a source folder and
+   moves `.json` and `.csv` files into a separate destination folder,
+   leaving everything else untouched.
 
 ## Folder structure
 
@@ -13,12 +22,19 @@ Enterprise Survey data into a Raw folder, transforms it and outputs into a Trans
 │   └── 2023_year_finance.csv
 ├── Gold/                         # Load layer — final output, ready for consumption
 │   └── 2023_year_finance.csv
-├── etl.sh                        # the entire ETL pipeline script file
-├── log_file.log                  # timestamped run log, appended on every run
+├── etl.sh                        # NZ Enterprise Survey ETL pipeline script
+├── source/                       # Input folder for migrate.sh — mixed file types
+|   └── languages.json            # Sample file to be moved
+├── json_and_CSV/                 # Output folder for migrate.sh — only .json/.csv files
+|   └── orders2018jan.csv         # Example moved file (json or csv)
+├── migrate.sh                    # JSON/CSV file migration utility script
+├── log_file.log                  # timestamped run log for etl.sh, appended every run
 └── README.md
 ```
 
 ## Project Workflow
+
+### `etl.sh` — Extract, Transform, Load
 The bash script was carefully written to achieve three things specifically:
 
 - **Extract:** Download the  NZ Annual Enterprise CSV file using this [url](https://www.stats.govt.nz/assets/Uploads/Annual-enterprise-survey/Annual-enterprise-survey-2023-financial-year-provisional/Download-data/annual-enterprise-survey-2023-financial-year-provisional.csv). However, before this download is done, some few checks are first carried out. Firstly, a check to see if the Raw folder already exists, and if not, creates that directly. Futhermore, the existence of the target csv file to write out the downloaded csv file to is also checked, as well as checking if the file is empty or not. It is only when these two things are not in place, before etl logic proceeds to download the csv file from the url. This is to avoid downloading the csv file everytime the etl bash script is executed, even though the raw file is already persisted locally. One thing to note in the download process is the use of the -f option on the curl command. This is intentional and deliberate in case the dowload curl errors due to an HTTP error code, this error message won't be written to the raw csv file instead. This is helped with the fact that the `set -e` command is written at the top of the script to end the bash process on any error instead of continuing to run.
@@ -31,8 +47,37 @@ The script ensures that the whole process is properly logged so as to keep track
 
 Finally, I created a cron job in the crontab by by opening the crontab editor using the command `crontab -e` and appending the command 0 0 * * * bash /path_to/etl.sh. *The purpose of this cronjob is to run the bash script called *"etl.sh"* at 12 midnight daily.*
 
+### `migrate.sh` — JSON/CSV file migration
+This script specifically checks a folder if there are json or csv files and then moves them to another folder. However, it does a few validations in the course of doing that, which includes:
+
+- Checks whether the destination folder (`json_and_CSV/`) exists, creating
+  it if not.
+
+- Loops through every file in `source/` using an **unquoted** glob
+  (`"$SOURCE"/*`) as quoting the glob disables wildcard expansion entirely.
+
+- Guards against an empty source folder: when the glob matches nothing,
+  bash still enters the loop once with the literal unexpanded pattern as
+  the value, so the script explicitly checks `[[ -e "$file" ]]` before
+  doing anything, and prints a message before skipping:
+
+```bash
+  [[ -e "$file" ]] || { echo "No files found in $SOURCE, nothing to migrate"; continue; }
+```
+
+- Extracts the bare filename with `basename` before using it in any
+  destination path or `mv` command as the loop variable itself holds the
+  *full path* (e.g. `./source/data.json`), and using it directly for both
+  the source and destination paths caused doubled, non-existent paths
+  (`./source/./source/data.json`) in earlier versions.
+
+- Moves `.json` and `.csv` files into the destination folder only if a
+  file with the same name doesn't already exist there, and leaves every
+  other file type untouched.
+
 ## Design decisions & logic
 
+### etl.sh
 **One script, three phases, guarded by file-existence and staleness
 checks.** Rather than always re-downloading, re-transforming, and
 re-loading on every run, each phase asks "has this already been done,
@@ -69,17 +114,78 @@ and is it still valid?" before doing any work:
   bad `curl`, a malformed `sed`) stops the whole pipeline immediately
   rather than continuing on top of a broken intermediate state.
 
+
+### migrate.sh
+
+**A single-pass file router, guarded by existence checks on both ends —
+source and destination.** The goal is to sort mixed file types into a
+dedicated folder without ever double-moving, overwriting, or silently
+failing on a file that isn't there:
+
+- **Destination folder creation*:* The destination folder is checked once up front (`[[ -d "$DEST" ]]`)
+  and created with `mkdir -p` only if missing — the same "don't assume,
+  check" pattern used throughout `etl.sh`.
+
+- **The source loop uses an unquoted glob** (`for file in "$SOURCE"/*`):
+  This was a deliberate fix after an earlier version quoted the glob
+  pattern (`"$SOURCE/*"`), which disables wildcard expansion entirely and
+  silently turns the loop into a single iteration over a literal string
+  instead of the files inside the folder. Quoting the *variable* is still
+  correct and necessary (`"$SOURCE"`) — it's specifically the `*` that
+  must stay outside the quotes to remain a wildcard.
+
+- **An explicit empty-folder guard** handles the case where the glob
+  matches nothing. By default, bash doesn't drop an unmatched glob — it
+  passes the literal, unexpanded pattern (`./source/*`) through as the
+  loop variable's value instead of skipping the iteration. Left
+  unhandled, the script would then try to process a nonexistent file
+  named literally `*`. The guard catches this explicitly and exits the
+  iteration with a clear message rather than failing further downstream
+  with a confusing error:
+
+```bash
+  [[ -e "$file" ]] || { echo "No files found in $SOURCE, nothing to migrate"; continue; }
+```
+
+- **`basename` extracts the bare filename from the full glob path.**
+  `$file` from the loop is always a full path (e.g. `./source/data.json`),
+  not just a filename. An earlier version used `$file` directly when
+  building destination paths and `mv` commands, which produced doubled,
+  non-existent paths like `./source/./source/data.json` — `mv` failed on
+  these silently (no `set -e`, no exit-code check), while the script's
+  own log output still claimed the move succeeded. Extracting
+  `FILENAME="$(basename "$file")"` once per iteration and using it
+  consistently on both the `mv` source and destination sides fixed this.
+
+- **Pattern matching against the extension is done with an unquoted glob
+  inside `[[ ]]`** (`$file == *.json`), not a quoted string
+  (`$file == "*.json"`). Inside `[[ ]]`, `==` only performs wildcard
+  pattern matching when the right-hand side is unquoted; quoting it turns
+  the comparison into a literal string match, which would never succeed
+  since no filename is literally `*.json`.
+
+- **Both branches (`.json` and `.csv`) check `! -e "$DEST/$FILENAME"`**
+  before moving — this makes reruns idempotent. A file that's already
+  been moved to `json_and_CSV/` won't attempt to move again if it somehow
+  still exists in `source/`, and any file not matching `.json` or `.csv`
+  falls through to the `else` branch and is left untouched.
+
 ## Quickstart
 
 ```bash
 git clone <this-repo>
 cd <this-repo>
+
+# run the ETL pipeline
 bash etl.sh
+
+# run the file migration utility
+bash migrate.sh
 ```
 
-That's it. Re-running `bash etl.sh` is safe. it will detect
-what's already been done and skip straight to whatever's actually
-missing or stale.
+Both scripts are safe to re-run — `etl.sh` will skip stages that are
+already up to date, and `migrate.sh` will skip files that have already
+been moved.
 
 ## Limitations
 

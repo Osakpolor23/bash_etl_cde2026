@@ -26,15 +26,15 @@ do
 
     # check if the file is a .json or .csv file and not in destination folder
     echo "Looping through $SOURCE and checking if $FILENAME is a json or csv file"
-    if [[ $file == *.json && ! -e "$DEST/$FILENAME" ]]; then
+    if [[ -f $file && $file == *.json && ! -e "$DEST/$FILENAME" ]]; then
         echo "$FILENAME is a json file"
         mv "$SOURCE/$FILENAME" "$DEST/$FILENAME"
         echo "$FILENAME is a json file and moved to $DEST"
-    elif [[ $file == *.csv && ! -e "$DEST/$FILENAME" ]]; then
+    elif [[ -f $file && $file == *.csv && ! -e "$DEST/$FILENAME" ]]; then
         echo "Checking to see if $FILENAME is a csv file"
         mv "$SOURCE/$FILENAME" "$DEST/$FILENAME"
         echo "$FILENAME is a csv file and moved to $DEST"
     else
-        echo "$FILENAME is neither a json or csv file, moving aborted"
+        echo "$FILENAME is neither a json or csv file, or it already exists in the target destination folder. Moving aborted"
     fi;
 done
